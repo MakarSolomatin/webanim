@@ -1,18 +1,436 @@
+<!DOCTYPE html>
 <html>
-
 <head>
-  <script src="js/anim/shader.js"></script>
-  <script src="js/anim/unit.js"></script>
-  <script src="js/anim/anim.js"></script>
-  <script src="js/main.js"></script>
-  <script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+    <title>Learning WebGL &mdash; lesson 2</title>
+    <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+    <script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+
+    <style type="text/css">
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+    </style>
+
+    <script type="text/javascript">
+        var gl, N, M, W, H;
+        var MouseDown = 0;
+        var Gradient;
+        var RectX = 0, RectY = 0;
+        var WheelDelta = 0;
+        var Scale = 0;
+        var lastMouseX = null;
+        var lastMouseY = null;
+        var Mx = 0, My = 0;
+        var deltaX = 0, deltaY = 0;
+        function initGL(canvas) {
+            try {
+                gl = canvas.getContext("experimental-webgl");
+                gl.viewportWidth = canvas.width;
+                gl.viewportHeight = canvas.height;
+            } catch (e) {
+            }
+            if (!gl) {
+                alert("Could not initialise WebGL, sorry :-(");
+            }
+        }
+        function loadShaderFromFile(gl, file, type) {
+            var request = new XMLHttpRequest();
+            request.open('GET', file, false);
+            var str;
+            request.onreadystatechange = function () {
+                if (request.readyState == 4) {
+                    if (request.status == 200) {
+                        str = request.responseText;
+                    } else {
+                        alert("Could not load shaders")
+                    }
+                }
+            };
+            request.send(null);
+            str = request.responseText;
+            var shader;
+            if (type == "fragment")
+                shader = gl.createShader(gl.FRAGMENT_SHADER);
+            else if (type == "vertex")
+                shader = gl.createShader(gl.VERTEX_SHADER);
+            else
+                return null;
+            gl.shaderSource(shader, str);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                alert(gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
+        function handleLoadedTexture(texture) {
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
+            /*
+             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);*/
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, Gradient);
+            gl.useProgram(PlShaderProgram);
+            gl.uniform1i(PlShaderProgram.sampler, 0);
+        }
+        var PlShaderProgram, CubeShaderProgram;
+        function initShaders() {
+            /* MANDELBROT SHADER */
+            var PlFragmentShader = loadShaderFromFile(gl, "mandel.fs", "fragment");
+            var PlVertexShader = loadShaderFromFile(gl, "mandel.vs", "vertex");
+            PlShaderProgram = gl.createProgram();
+            gl.attachShader(PlShaderProgram, PlVertexShader);
+            gl.attachShader(PlShaderProgram, PlFragmentShader);
+            gl.linkProgram(PlShaderProgram);
+            if (!gl.getProgramParameter(PlShaderProgram, gl.LINK_STATUS)) {
+                alert("Could not initialise shaders");
+            }
+            gl.useProgram(PlShaderProgram);
+            PlShaderProgram.vertexPositionAttribute = gl.getAttribLocation(PlShaderProgram, "aVertexPosition");
+            gl.enableVertexAttribArray(PlShaderProgram.vertexPositionAttribute);
+            PlShaderProgram.textureCoordAttribute = gl.getAttribLocation(PlShaderProgram, "aTextureCoord");
+            gl.enableVertexAttribArray(PlShaderProgram.textureCoordAttribute);
+            //gl.vertexAttribPointer(PlShaderProgram.textureCoordAttribute, 2, gl.FLOAT, false, 0, 0);
+            PlShaderProgram.pMatrixUniform = gl.getUniformLocation(PlShaderProgram, "uPMatrix");
+            PlShaderProgram.mvMatrixUniform = gl.getUniformLocation(PlShaderProgram, "uMVMatrix");
+            PlShaderProgram.N = gl.getUniformLocation(PlShaderProgram, "N");
+            PlShaderProgram.M = gl.getUniformLocation(PlShaderProgram, "M");
+            PlShaderProgram.MouseDown = gl.getUniformLocation(PlShaderProgram, "MouseDown");
+            PlShaderProgram.DeltaX = gl.getUniformLocation(PlShaderProgram, "DeltaX");
+            PlShaderProgram.DeltaY = gl.getUniformLocation(PlShaderProgram, "DeltaY");
+            PlShaderProgram.MouseX = gl.getUniformLocation(PlShaderProgram, "MouseX");
+            PlShaderProgram.MouseY = gl.getUniformLocation(PlShaderProgram, "MouseY");
+            PlShaderProgram.W = gl.getUniformLocation(PlShaderProgram, "W");
+            PlShaderProgram.H = gl.getUniformLocation(PlShaderProgram, "H");
+            PlShaderProgram.WheelDelta = gl.getUniformLocation(PlShaderProgram, "WheelDelta");
+            PlShaderProgram.Scale = gl.getUniformLocation(PlShaderProgram, "Scale");
+            PlShaderProgram.sampler = gl.getUniformLocation(PlShaderProgram, "uSampler");
+            /* CUBE SHADER */
+            var CubeFragmentShader = loadShaderFromFile(gl, "cube.fs", "fragment");
+            var CubeVertexShader = loadShaderFromFile(gl, "cube.vs", "vertex");
+            CubeShaderProgram = gl.createProgram();
+            gl.attachShader(CubeShaderProgram, CubeVertexShader);
+            gl.attachShader(CubeShaderProgram, CubeFragmentShader);
+            gl.linkProgram(CubeShaderProgram);
+            if (!gl.getProgramParameter(CubeShaderProgram, gl.LINK_STATUS)) {
+                alert("Could not initialise shaders");
+            }
+            gl.useProgram(CubeShaderProgram);
+            CubeShaderProgram.vertexPositionAttribute = gl.getAttribLocation(CubeShaderProgram, "aVertexPosition");
+            gl.enableVertexAttribArray(CubeShaderProgram.vertexPositionAttribute);
+            CubeShaderProgram.textureCoordAttribute = gl.getAttribLocation(CubeShaderProgram, "aTextureCoord");
+            gl.enableVertexAttribArray(CubeShaderProgram.textureCoordAttribute);
+            CubeShaderProgram.pMatrixUniform = gl.getUniformLocation(CubeShaderProgram, "uPMatrix");
+            CubeShaderProgram.mvMatrixUniform = gl.getUniformLocation(CubeShaderProgram, "uMVMatrix");
+            CubeShaderProgram.sampler = gl.getUniformLocation(PlShaderProgram, "uSampler");
+        }
+        var mvMatrix = mat4.create();
+        var pMatrix = mat4.create();
+        var mvMatrixStack = [];
+        function mvPushMatrix() {
+            var copy = mat4.create();
+            mat4.set(mvMatrix, copy);
+            mvMatrixStack.push(copy);
+        }
+        function mvPopMatrix() {
+            if (mvMatrixStack.length == 0) {
+                throw "Invalid popMatrix!";
+            }
+            mvMatrix = mvMatrixStack.pop();
+        }
+        function degToRad(degrees) {
+            return degrees * Math.PI / 180;
+        }
+        function setMatrixUniforms() {
+            gl.useProgram(PlShaderProgram);
+            gl.uniformMatrix4fv(PlShaderProgram.pMatrixUniform, false, pMatrix);
+            gl.uniformMatrix4fv(PlShaderProgram.mvMatrixUniform, false, mvMatrix);
+            gl.uniform1f(PlShaderProgram.M, M);
+            gl.uniform1i(PlShaderProgram.N, N);
+            gl.uniform1f(PlShaderProgram.MouseX, Mx);
+            gl.uniform1f(PlShaderProgram.MouseY, H - My);
+            gl.uniform1f(PlShaderProgram.DeltaX, deltaX);
+            gl.uniform1f(PlShaderProgram.DeltaY, deltaY);
+            gl.uniform1i(PlShaderProgram.MouseDown, MouseDown)
+            gl.uniform1f(PlShaderProgram.W, W);
+            gl.uniform1f(PlShaderProgram.H, H);
+            gl.uniform1f(PlShaderProgram.WheelDelta, 0);
+            gl.uniform1f(PlShaderProgram.Scale, (Scale + 10000.0) / 10000.0);
+            gl.useProgram(CubeShaderProgram);
+            gl.uniformMatrix4fv(CubeShaderProgram.pMatrixUniform, false, pMatrix);
+            gl.uniformMatrix4fv(CubeShaderProgram.mvMatrixUniform, false, mvMatrix);
+        }
+        var rttFramebuffer;
+        var rttTexture;
+        function initTextureFramebuffer() {
+            /* framebuffer creation */
+            rttFramebuffer = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, rttFramebuffer);
+            rttFramebuffer.width = 512;
+            rttFramebuffer.height = 512;
+            /* framebuffer texture creation */
+            rttTexture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, rttTexture);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+            gl.generateMipmap(gl.TEXTURE_2D);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, rttFramebuffer.width, rttFramebuffer.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+            /* renderbuffer creation */
+            var renderbuffer = gl.createRenderbuffer();
+            gl.bindRenderbuffer(gl.RENDERBUFFER, renderbuffer);
+            gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, rttFramebuffer.width, rttFramebuffer.height);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, rttTexture, 0);
+            gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, renderbuffer);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        }
+        var CubePosBuf, CubeTexBuf;
+        var PlPosBuf, PlIndBuf, PlTexBuf;
+        function initBuffers() {
+            var vertices;
+            PlPosBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, PlPosBuf);
+            vertices = [
+                1.5, 3.0, 0.0,
+                -4.5, 3.0, 0.0,
+                1.5, -3.0, 0.0,
+                -4.5, -3.0, 0.0
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+            PlPosBuf.itemSize = 3;
+            PlPosBuf.numItems = 4;
+            CubePosBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, CubePosBuf);
+            vertices = [
+                // Front face
+                -1.0, -1.0,  1.0,
+                1.0, -1.0,  1.0,
+                1.0,  1.0,  1.0,
+                -1.0,  1.0,  1.0,
+                // Back face
+                -1.0, -1.0, -1.0,
+                -1.0,  1.0, -1.0,
+                1.0,  1.0, -1.0,
+                1.0, -1.0, -1.0,
+                // Top face
+                -1.0,  1.0, -1.0,
+                -1.0,  1.0,  1.0,
+                1.0,  1.0,  1.0,
+                1.0,  1.0, -1.0,
+                // Bottom face
+                -1.0, -1.0, -1.0,
+                1.0, -1.0, -1.0,
+                1.0, -1.0,  1.0,
+                -1.0, -1.0,  1.0,
+                // Right face
+                1.0, -1.0, -1.0,
+                1.0,  1.0, -1.0,
+                1.0,  1.0,  1.0,
+                1.0, -1.0,  1.0,
+                // Left face
+                -1.0, -1.0, -1.0,
+                -1.0, -1.0,  1.0,
+                -1.0,  1.0,  1.0,
+                -1.0,  1.0, -1.0,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+            CubePosBuf.itemSize = 3;
+            CubePosBuf.numItems = 24;
+            // TEXTURE BUFFER
+            PlTexBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, PlTexBuf);
+            var texcoords = [
+                0.0, 0.0,
+                1.0, 0.0,
+                1.0, 1.0,
+                0.0, 1.0,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texcoords), gl.STATIC_DRAW);
+            PlTexBuf.itemSize = 2;
+            PlTexBuf.numItems = 4;
+            CubeTexBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, CubeTexBuf);
+            texcoords = [
+                // Front face
+                0.0, 0.0,
+                1.0, 0.0,
+                1.0, 1.0,
+                0.0, 1.0,
+                // Back face
+                0.0, 1.0,
+                0.0, 0.0,
+                1.0, 0.0,
+                1.0, 1.0,
+                // Top face
+                1.0, 1.0,
+                0.0, 1.0,
+                0.0, 0.0,
+                1.0, 0.0,
+                // Bottom face
+                1.0, 0.0,
+                1.0, 1.0,
+                0.0, 1.0,
+                0.0, 0.0,
+                // Right face
+                0.0, 0.0,
+                1.0, 0.0,
+                1.0, 1.0,
+                0.0, 1.0,
+                // Left face
+                0.0, 1.0,
+                0.0, 0.0,
+                1.0, 0.0,
+                1.0, 1.0
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texcoords), gl.STATIC_DRAW);
+            CubeTexBuf.itemSize = 2;
+            CubeTexBuf.numItems = 24;
+            var indicies;
+            CubeIndBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, CubeIndBuf);
+            indicies = [
+                0, 1, 2,      0, 2, 3,    // Front face
+                4, 5, 6,      4, 6, 7,    // Back face
+                8, 9, 10,     8, 10, 11,  // Top face
+                12, 13, 14,   12, 14, 15, // Bottom face
+                16, 17, 18,   16, 18, 19, // Right face
+                20, 21, 22,   20, 22, 23  // Left face
+            ];
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indicies), gl.STATIC_DRAW);
+            CubeIndBuf.itemSize = 1;
+            CubeIndBuf.numItems = 36;
+        }
+        function initTexture() {
+            Gradient = gl.createTexture();
+            Gradient.image = new Image();
+            Gradient.image.onload = function () {
+                handleLoadedTexture(Gradient)
+            }
+            Gradient.image.src = "Gradient2.jpg";
+        }
+        var xRot = 0;
+        var yRot = 0;
+        var zRot = 0;
+        function drawScene() {
+            gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            mat4.perspective(45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0, pMatrix);
+            mat4.identity(mvMatrix);
+            mat4.translate(mvMatrix, [1.5, 0.0, -7.0]);
+            mat4.rotate(mvMatrix, degToRad(xRot), [1, 0, 0]);
+            //MANDELBROT RENDERING
+            gl.bindFramebuffer(gl.FRAMEBUFFER, rttFramebuffer);
+            gl.bindBuffer(gl.ARRAY_BUFFER, PlPosBuf);
+            gl.vertexAttribPointer(PlShaderProgram.vertexPositionAttribute, CubePosBuf.itemSize, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, PlTexBuf);
+            gl.vertexAttribPointer(PlShaderProgram.textureCoordAttribute, PlTexBuf.itemSize, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, PlPosBuf);
+            setMatrixUniforms();
+            gl.useProgram(PlShaderProgram);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, PlPosBuf.numItems);
+            /* Send bound texture  */
+            gl.bindTexture(gl.TEXTURE_2D, rttTexture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, rttTexture.image);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, rttTexture);
+            gl.useProgram(CubeShaderProgram);
+            gl.uniform1i(CubeShaderProgram.sampler, 0);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            // CUBE RENDERING
+            gl.bindBuffer(gl.ARRAY_BUFFER, CubePosBuf);
+            gl.vertexAttribPointer(CubeShaderProgram.vertexPositionAttribute, CubePosBuf.itemSize, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, CubeTexBuf);
+            gl.vertexAttribPointer(CubeShaderProgram.textureCoordAttribute, CubeTexBuf.itemSize, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, CubeIndBuf);
+            setMatrixUniforms();
+            gl.useProgram(CubeShaderProgram);
+            gl.drawElements(gl.TRIANGLES, CubeIndBuf.numItems, gl.UNSIGNED_SHORT, 0);
+        }
+        var lastTime = 0;
+        function animate() {
+            var timeNow = new Date().getTime();
+            if (lastTime != 0) {
+                var elapsed = timeNow - lastTime;
+                xRot += (90 * elapsed) / 1000.0;
+                yRot += (90 * elapsed) / 1000.0;
+                zRot += (90 * elapsed) / 1000.0;
+            }
+            lastTime = timeNow;
+        }
+        function handleMouseDown(event) {
+            MouseDown = 1;
+            lastMouseX = event.clientX;
+            lastMouseY = event.clientY;
+        }
+        function handleMouseUp(event) {
+            MouseDown = 0;
+        }
+        function handleMouseMove(event) {
+            var newX = event.clientX;
+            var newY = event.clientY;
+            if (MouseDown) {
+                deltaY += newY - lastMouseY;
+                deltaX += newX - lastMouseX;
+            }
+            lastMouseX = newX;
+            lastMouseY = newY;
+        }
+        function OnWheel() {
+            Scale -= event.wheelDelta;
+            Mx = event.clientX;
+            My = event.clientY;
+            //alert(Scale);
+        }
+        function tick() {
+            requestAnimationFrame(tick);
+            animate();
+            document.getElementById("log").innerHTML = "deltaX: " + deltaX + ", deltaY : " + deltaY +
+                    ", wheel : " + Scale + ", mouseX : " + lastMouseX + ", mouse Y : " + lastMouseY +
+                    ", scaleMx : " + Mx + ", scaleMy : " + My;
+            drawScene();
+        }
+        function webGLStart() {
+            var canvas = document.getElementById("lesson02-canvas");
+            initGL(canvas);
+            initTextureFramebuffer();
+            initShaders();
+            initBuffers();
+            canvas.onmousedown = handleMouseDown;
+            document.onmouseup = handleMouseUp;
+            document.onmousemove = handleMouseMove;
+            W = canvas.width;
+            H = canvas.height;
+            initTexture();
+            gl.enable(gl.DEPTH_TEST);
+            drawScene();
+            tick();
+        }
+    </script>
+
+
 </head>
 
-<body onload=main()>
 
-  <div id="log"></div>
-  <canvas id="maincanvas" width="800" height="600">
-  </canvas>
+<body onload="webGLStart();">
+<canvas id="lesson02-canvas" onwheel="OnWheel()" style="border: none;" width="800" height="800" margin="7"></canvas>
+<div id="log" ;
+">&nbsp;</div>
+<h1>Edem v sosednee selo:</h1>
+<audio controls>
+    <source src="edem.mp3" type="audio/mp3"
+</audio>
 </body>
-
 </html>
