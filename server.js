@@ -1,4 +1,10 @@
-var http = require("http");
+var express = require('express');
+    var app = express.createServer();
+    app.get('/', function(req, res){
+        res.send('Hello World');
+    });
+    app.configure(function () {
+        app.use(express.static(__dirname + '/static'));
+    })
 
-http.createServer(function(request, response) {
-}).listen(8888);
+    app.listen(8000);
